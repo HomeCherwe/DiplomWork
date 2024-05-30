@@ -154,3 +154,5 @@ cython_debug/
 test.wav
 model.pth
 config.yaml
+feats_stats.npz
+spk_xvector.ark
