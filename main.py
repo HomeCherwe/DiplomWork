@@ -114,7 +114,8 @@ class Assistant:
                                                 else:
                                                     text_say = f'Температура в спальні {status_res[0]} і {status_res[1]} градуса' 
                                                 self.PlaySound(text_say)
-            except:
+            except Exception as e:
+                print(e)
                 continue
     
     def on_off_controll_devices(self, value, device_id, code):
