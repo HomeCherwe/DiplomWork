@@ -156,3 +156,5 @@ model.pth
 config.yaml
 feats_stats.npz
 spk_xvector.ark
+model_ua.pt
+latest_silero_models.yml
