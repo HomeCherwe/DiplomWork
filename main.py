@@ -1,6 +1,12 @@
+import warnings
+
+# Ignore specific warning
+warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
+
 import time
 import os 
 import threading
+import hashlib
 
 import speech_recognition as sr                     # pip install SpeechRecognition
 from tuya_connector import TuyaOpenAPI              # pip3 install tuya-connector-python
@@ -11,47 +17,44 @@ from dotenv import load_dotenv                      # pip install python-dotenv
 import pvporcupine
 import pyaudio
 import struct
-import torch
 from IPython.display import Audio, display
 from pydub import AudioSegment
 from pydub.playback import play
 
-# device = torch.device('cpu')
-# torch.set_num_threads(4)
-# local_file = 'model_ua.pt'
-
-# if not os.path.isfile(local_file):
-#     torch.hub.download_url_to_file('https://models.silero.ai/models/tts/ua/v4_ua.pt',
-#                                    local_file)  
-
 load_dotenv()
-
-tts = TTS(device="cpu")
-
 
 access_id = os.getenv('ACCESS_ID')
 access_key = os.getenv('ACCESS_KEY')
 end_point = os.getenv('ENDPOINT')
 uid= os.getenv('UID')
-# AccessKey obtained from Picovoice Console (https://console.picovoice.ai/)
 picovoice_key = os.getenv('PICOVOICE_KEY')
-
-openapi = TuyaOpenAPI(end_point, access_id, access_key)
-openapi.connect()
-
-res = openapi.get(f"/v1.0/users/{uid}/devices")
-list_devices = res['result']
 
 class Assistant:
     def __init__(self):
-        self.PlaySound('Я увімкнутий!')
-        threading.Thread(target=self.run_assistant).start()
-        print('Я увімкнутий!')
+        self.tts = TTS(device="cpu")
+        self.openapi = TuyaOpenAPI(end_point, access_id, access_key)
+        self.openapi.connect()
+        try:
+            self.res = self.openapi.get(f"/v1.0/users/{uid}/devices")
+            if 'result' in self.res:
+                self.list_devices = self.res['result']
+            else:
+                print("Error: 'result' not found in response.")
+                print("Response:", self.res)
+                return
+
+            self.PlaySound('Я увімкнутий!')
+            threading.Thread(target=self.run_assistant).start()
+        except Exception as e:
+            print("Failed to get devices:", e)
+
 
     def run_assistant(self):
         while True:
             try:
+
                 porcupine = pvporcupine.create(access_key=picovoice_key, keyword_paths=['wakeup-wakeword.ppn'])
+                
                 pa = pyaudio.PyAudio()
                 audio_stream = pa.open(
                     rate=porcupine.sample_rate,
@@ -62,17 +65,21 @@ class Assistant:
                     )
 
                 while True:
+                    start_time = time.time()    
                     pcm = audio_stream.read(porcupine.frame_length)
                     pcm = struct.unpack_from('h' * porcupine.frame_length, pcm)
                     keyword_index = porcupine.process(pcm)
                     if keyword_index >= 0:
+                        end_time = time.time()
+                        execution_time = end_time - start_time
+                        print(f"Скрипт виконувався {execution_time} секунд")
                         self.takeCommand()
             except Exception as e:
                 print(e)
                 continue
     
     def takeCommand(self):
-        # self.PlaySound(f'Я слухаю вас сер!') 
+        self.PlaySound(f'Я слухаю вас сер!') 
         r = sr.Recognizer()
 
         with sr.Microphone() as source:
@@ -83,13 +90,13 @@ class Assistant:
                 text = r.recognize_google(audio, language='uk-UA').lower()
                 print("You said:", text)
 
-                if text == 'stop':
+                if text == 'стоп':
                     self.root.destroy()
                     sys.exit()
                 else:
                     if text is not None:
                         if "включи" in text or "виключи" in text:
-                            for device in list_devices:
+                            for device in self.list_devices:
                                 name_device = device['name'].lower()
                                 status = device['status'][0]['value']
                                 code = device['status'][0]['code']
@@ -105,10 +112,10 @@ class Assistant:
                                                 mnojnik = 60
                                             elif time_what == 'годин':
                                                 mnojnik = 120
-                                            # self.PlaySound(f'{name_device} буде увімкнуто через {count} {time_what}!')
+                                            self.PlaySound(f'{name_device} буде увімкнуто через {count} {time_what}!')
                                             threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(True, device_id, code)).start()
                                         else:
-                                            # self.PlaySound(f'Вмикаю {name_device}')
+                                            self.PlaySound(f'Вмикаю {name_device}')
                                             self.on_off_controll_devices(True, device_id, code)
                                         
                                     elif "виключи" in text:
@@ -120,15 +127,15 @@ class Assistant:
                                                 mnojnik = 60
                                             elif time_what == 'годин':
                                                 mnojnik = 120
-                                            # self.PlaySound(f'{name_device} буде вимкнуто через {count} {time_what}!')
+                                            self.PlaySound(f'{name_device} буде вимкнуто через {count} {time_what}!')
                                             threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(False, device_id, code)).start()
                                         else:
-                                            # self.PlaySound(f'Вимикаю {name_device}')
+                                            self.PlaySound(f'Вимикаю {name_device}')
                                             self.on_off_controll_devices(False, device_id, code)
 
                         elif "який" in text or "яка" in text or "яке" in text:
                             if 'температура' in text:
-                                for device in list_devices:
+                                for device in self.list_devices:
                                     name_device = device['name'].lower()
                                     status = device['status'][0]['value']
                                     code = device['status'][0]['code']
@@ -147,25 +154,40 @@ class Assistant:
 
     def on_off_controll_devices(self, value, device_id, code):
         commands = {'commands': [{'code': code, 'value': value}]}
-        res = openapi.post(f"/v1.0/devices/{device_id}/commands", commands)
+        res = self.openapi.post(f"/v1.0/devices/{device_id}/commands", commands)
         print(res)
     
     def PlaySound(self, text):
+        
+        def get_hashed_filename(text):
+            # Generate a unique filename based on the hash of the text
+            hash_object = hashlib.md5(text.encode())
+            return f"{hash_object.hexdigest()}.wav"
 
-        model = torch.package.PackageImporter(local_file).load_pickle("tts_models", "model")
-        model.to(device)
+        filename = get_hashed_filename(text)
+        filepath = os.path.join("cache", filename)
+        os.makedirs("cache", exist_ok=True)
 
-        sample_rate = 24000
-        speaker='mykyta'
+        start_time = time.time()
+        
+        if not os.path.exists(filepath):
+            with open(filepath, mode="wb") as file:
+                _, output_text = self.tts.tts(text, Voices.Dmytro.value, Stress.Dictionary.value, file)
+            print("Accented text:", output_text)
+        else:
+            print("Using cached file:", filepath)
 
-        audio_paths = model.save_wav(text=text,
-                                    speaker=speaker,
-                                    sample_rate=sample_rate)
+        while True:
+            try:
+                audio = AudioSegment.from_wav(filepath)
+                play(audio)
+                break
+            except Exception as e:
+                print(e)
+                continue
 
-        # Завантажуємо .wav файл
-        audio = AudioSegment.from_wav(audio_paths)
-
-        # Відтворюємо аудіо
-        play(audio)
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f"Скрипт виконувався {execution_time} секунд")
  
 Assistant()
