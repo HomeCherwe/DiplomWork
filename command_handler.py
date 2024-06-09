@@ -18,6 +18,9 @@ class CommandHandler:
             os.getenv('ACCESS_KEY')
         )
         self.openapi.connect()
+        self.reload_device()
+
+    def reload_device(self):
         res = self.openapi.get(f"/v1.0/users/{os.getenv('UID')}/devices")
         if 'result' in res:
             self.list_devices = res['result']
@@ -46,6 +49,7 @@ class CommandHandler:
             return command
 
     def execute_command(self, command):
+        self.reload_device()
         if command == 'стоп':
             self.root.destroy()
             sys.exit()
@@ -69,10 +73,10 @@ class CommandHandler:
                                     elif time_what == 'годин':
                                         mnojnik = 120
                                     self.tts_handler.play_sound(f'{name_device} буде увімкнуто через {count} {time_what}!')
-                                    threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(True, device_id, code)).start()
+                                    threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(True, status, device_id, code)).start()
                                 else:
                                     self.tts_handler.play_sound(f'Вмикаю {name_device}')
-                                    self.on_off_controll_devices(True, device_id, code)
+                                    self.on_off_controll_devices(True, status, device_id, code)
                                 
                             elif "виключи" in command:
                                 if "через" in command:
@@ -84,10 +88,14 @@ class CommandHandler:
                                     elif time_what == 'годин':
                                         mnojnik = 120
                                     self.tts_handler.play_sound(f'{name_device} буде вимкнуто через {count} {time_what}!')
-                                    threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(False, device_id, code)).start()
+                                    threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(False, status, device_id, code)).start()
                                 else:
                                     self.tts_handler.play_sound(f'Вимикаю {name_device}')
-                                    self.on_off_controll_devices(False, device_id, code)
+                                    self.on_off_controll_devices(False, status, device_id, code)
+
+
+                        # else:
+                        #     self.tts_handler.play_sound(f'Такого девайсу не знайдено')
 
                 elif "який" in command or "яка" in command or "яке" in command:
                     if 'температура' in command:
@@ -105,10 +113,32 @@ class CommandHandler:
                                 else:
                                     text_say = f'Температура в спальні {status_res[0]} і {status_res[1]} градуса' 
                                     self.tts_handler.play_sound(text_say)
-
-    def on_off_controll_devices(self, value, device_id, code):
+                else:
+                    self.tts_handler.play_sound('Я не розумію цієї команди!')
+    def on_off_controll_devices(self, value, status, device_id, code):
+        
         commands = {'commands': [{'code': code, 'value': value}]}
         res = self.openapi.post(f"/v1.0/devices/{device_id}/commands", commands)
-        print(res)
-        pass
+
+        if "msg" in res:
+            msg = res['msg']
+            if msg == 'device is offline':
+                self.tts_handler.play_sound('Девайс офлайн')
+            else:
+                self.tts_handler.play_sound(msg)
+            return
+        if 'success' in res:
+            success = res['success']
+            if not success:
+                msg = res['msg']
+                self.tts_handler.play_sound(msg)
+                return
+        if status == value:
+            if value:
+                self.tts_handler.play_sound('Девайс вже включений')
+            else:
+                self.tts_handler.play_sound('Девайс вже виключений')
+            return
+
+        
 
