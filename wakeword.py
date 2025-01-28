@@ -7,7 +7,13 @@ class Wakeword:
         self.picovoice_key = picovoice_key
         self.porcupine = pvporcupine.create(access_key=picovoice_key, keyword_paths=['wakeup-wakeword.ppn'])
         self.audio = pyaudio.PyAudio()
-        self.stream = self.audio.open(rate=self.porcupine.sample_rate, channels=1, format=pyaudio.paInt16, input=True, frames_per_buffer=self.porcupine.frame_length)
+        self.stream = self.audio.open(
+            rate=self.porcupine.sample_rate, 
+            channels=1, 
+            format=pyaudio.paInt16, 
+            input=True, 
+            frames_per_buffer=self.porcupine.frame_length
+            )
     def listen_for_wakeword(self, callback):
         print("Listening for wakeword...")
         while True:

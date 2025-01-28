@@ -1,15 +1,19 @@
+import json
 import speech_recognition as sr
 from tuya_connector import TuyaOpenAPI
 import os
+import sys
 from dotenv import load_dotenv
+from fuzzywuzzy import fuzz
 
 class CommandHandler:
-    def __init__(self, tts_handler):
+    def __init__(self, tts_handler, config_file='commands.json'):
         self.tts_handler = tts_handler
         self.load_env_and_connect()
+        self.load_commands(config_file)
 
     def load_env_and_connect(self):
-        load_dotenv()
+        from dotenv import load_dotenv
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
         self.openapi = TuyaOpenAPI(
@@ -19,6 +23,10 @@ class CommandHandler:
         )
         self.openapi.connect()
         self.reload_device()
+
+    def load_commands(self, config_file):
+        with open(config_file, 'r', encoding='utf-8') as file:
+            self.commands = json.load(file)["commands"]
 
     def reload_device(self):
         res = self.openapi.get(f"/v1.0/users/{os.getenv('UID')}/devices")
@@ -31,7 +39,6 @@ class CommandHandler:
 
     def listen_for_command(self):
         print("Listening for command...")
-        print(self.list_devices)
         command = ''
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
@@ -50,94 +57,129 @@ class CommandHandler:
 
     def execute_command(self, command):
         self.reload_device()
-        if command == 'стоп':
-            self.root.destroy()
-            sys.exit()
-        else:
-            if command is not None:
-                if "включи" in command or "виключи" in command:
-                    for device in self.list_devices:
-                        name_device = device['name'].lower()
-                        status = device['status'][0]['value']
-                        code = device['status'][0]['code']
-                        device_id = device['id']
+        for cmd in self.commands:
+            if cmd["keyword"] in command:
+                if cmd["action"] == "exit":
+                    self.tts_handler.play_sound("Вихід з програми.")
+                    print("Вихід з програми.")
+                    sys.exit()
+                elif cmd["action"] == "control_device":
+                    device_name = self.extract_device_name(command)
+                    self.control_device(device_name, cmd["value"])
+                elif cmd["action"] == "check_temperature":
+                    room_name = command.split(' ')[-1:][0]
+                    self.check_temperature(room_name)
+                return
+        self.tts_handler.play_sound("Я не розумію цієї команди!")
+        print("Я не розумію цієї команди!")
 
-                        if name_device in command:
-                            if "включи" in command:
-                                if "через" in command:
-                                    mnojnik = 1
-                                    count = int(command.split()[3])
-                                    time_what = command.split()[4]
-                                    if time_what == 'минут' or time_what == 'минуту':
-                                        mnojnik = 60
-                                    elif time_what == 'годин':
-                                        mnojnik = 120
-                                    self.tts_handler.play_sound(f'{name_device} буде увімкнуто через {count} {time_what}!')
-                                    threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(True, status, device_id, code)).start()
-                                else:
-                                    self.tts_handler.play_sound(f'Вмикаю {name_device}')
-                                    self.on_off_controll_devices(True, status, device_id, code)
-                                
-                            elif "виключи" in command:
-                                if "через" in command:
-                                    mnojnik = 1
-                                    count = int(command.split()[3])
-                                    time_what = command.split()[4]
-                                    if time_what == 'минут' or time_what == 'минуту':
-                                        mnojnik = 60
-                                    elif time_what == 'годин':
-                                        mnojnik = 120
-                                    self.tts_handler.play_sound(f'{name_device} буде вимкнуто через {count} {time_what}!')
-                                    threading.Timer(count*mnojnik, self.on_off_controll_devices, args=(False, status, device_id, code)).start()
-                                else:
-                                    self.tts_handler.play_sound(f'Вимикаю {name_device}')
-                                    self.on_off_controll_devices(False, status, device_id, code)
+    def extract_device_name(self, command):
+        # Функція для вилучення назви пристрою з команди
+        words = command.split()
+        highest_ratio = 0
 
+        for word in words:
+                for device in self.get_all_device_names():
+                    match_ratio = fuzz.partial_ratio(device, word)
+                    print(match_ratio)
+                    print(word)
+                    print(device)
+                    if match_ratio > highest_ratio:
+                        highest_ratio = match_ratio
+                    if highest_ratio > 70:
+                        return device
+        self.tts_handler.play_sound("Девайс не знайдено.")
+        print("Девайс не знайдено.")
+        return None
 
-                        # else:
-                        #     self.tts_handler.play_sound(f'Такого девайсу не знайдено')
+    def get_all_device_names(self):
+        # Отримати всі назви пристроїв з списку пристроїв
+        return [device["name"].lower() for device in self.list_devices]
 
-                elif "який" in command or "яка" in command or "яке" in command:
-                    if 'температура' in command:
-                        for device in self.list_devices:
-                            name_device = device['name'].lower()
-                            status = device['status'][0]['value']
-                            code = device['status'][0]['code']
-                            device_id = device['id']
-
-                            if name_device == 'температура спальня':
-                                status = str(status/10)
-                                status_res = status.split('.')
-                                if status_res[1] == '0':
-                                    text_say = f'Температура в спальні {status_res[0]} градуса' 
-                                else:
-                                    text_say = f'Температура в спальні {status_res[0]} і {status_res[1]} градуса' 
-                                    self.tts_handler.play_sound(text_say)
+    def control_device(self, device_name, value):
+        if not device_name:
+            return
+        for device in self.list_devices:
+            if device_name.lower() == device['name'].lower():
+                device_id = device["id"]
+                code = device["status"][0]["code"]
+                status = device["status"][0]["value"]
+                if value:
+                    self.tts_handler.play_sound(f'Вмикаю {device_name}')
+                    print(f'Вмикаю {device_name}')
                 else:
-                    self.tts_handler.play_sound('Я не розумію цієї команди!')
+                    self.tts_handler.play_sound(f'Вимикаю {device_name}')
+                    print(f'Вимикаю {device_name}')
+                self.on_off_controll_devices(value, status, device_id, code)
+        
+
+    def check_temperature(self, room_name_partial):
+        res_homes = self.openapi.get(f"/v1.0/users/{os.getenv('UID')}/homes")
+        home_id = res_homes['result'][0]['home_id']
+
+        res_rooms = self.openapi.get(f"/v1.0/homes/{home_id}/rooms")
+        rooms_list = res_rooms['result']['rooms']
+
+        best_match = None
+        highest_ratio = 0
+        for room in rooms_list:
+            match_ratio = fuzz.partial_ratio(room_name_partial.lower(), room['name'].lower())
+            if match_ratio > highest_ratio:
+                highest_ratio = match_ratio
+                best_match = room
+        room_id = best_match['room_id'] if highest_ratio > 70 else None
+
+        if not room_id:
+            self.tts_handler.play_sound(f'Кімната {room_name_partial} не знайдена!')
+            print(f'Кімната {room_name_partial} не знайдена!')
+            return
+
+        devices_in_room = self.openapi.get(f"/v1.0/homes/{home_id}/rooms/{room_id}/devices")
+
+        if devices_in_room.get('success'):
+            for device in devices_in_room['result']:
+                if device['status'][0]['code'] == 'va_temperature':
+                    temp = float(device['status'][0]['value'])/10
+                    temp = str(temp).split('.')
+                    if temp[1] == '0':
+                        text_say = f"У {room_name_partial} {temp[0]} градуса!"
+                    else:
+                        text_say = f"У {room_name_partial} {temp[0]} і {temp[1]} градуса!"
+                    self.tts_handler.play_sound(text_say)
+                    return
+            self.tts_handler.play_sound(f"У {room_name_partial} немає датчика температури!")
+            print(f"У {room_name_partial} немає датчика температури!")
+        else:
+            print("Error: 'result' not found in response.")
+            print("Response:", res)
+        
     def on_off_controll_devices(self, value, status, device_id, code):
         
         commands = {'commands': [{'code': code, 'value': value}]}
         res = self.openapi.post(f"/v1.0/devices/{device_id}/commands", commands)
+        
 
         if "msg" in res:
-            msg = res['msg']
-            if msg == 'device is offline':
+            if res['msg'] == 'device is offline':
                 self.tts_handler.play_sound('Девайс офлайн')
+                print('Девайс офлайн')
             else:
-                self.tts_handler.play_sound(msg)
+                self.tts_handler.play_sound(res['msg'])
+                print(res['msg'])
             return
         if 'success' in res:
             success = res['success']
             if not success:
-                msg = res['msg']
-                self.tts_handler.play_sound(msg)
+                self.tts_handler.play_sound(res['msg'])
+                print(res['msg'])
                 return
         if status == value:
             if value:
                 self.tts_handler.play_sound('Девайс вже включений')
+                print('Девайс вже включений')
             else:
                 self.tts_handler.play_sound('Девайс вже виключений')
+                print('Девайс вже виключений')
             return
 
         

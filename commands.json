@@ -1,0 +1,22 @@
+{
+  "commands": [
+    {
+      "keyword": "стоп",
+      "action": "exit"
+    },
+    {
+      "keyword": "включи",
+      "action": "control_device",
+      "value": true
+    },
+    {
+      "keyword": "виключи",
+      "action": "control_device",
+      "value": false
+    },
+    {
+      "keyword": "яка температура",
+      "action": "check_temperature"
+    }
+  ]
+}
